@@ -1,0 +1,15 @@
+{
+  "permission": {
+    "skills": "allow"
+  },
+  "mcp": {
+    "browser": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp@latest"
+      ]
+    }
+  }
+}
