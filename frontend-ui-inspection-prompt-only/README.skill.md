@@ -8,19 +8,23 @@ Essa skill ajuda o agente de IA a **"ver" sua interface** (através do navegador
 - Editar o frontend (botões, cores, textos, layout) de forma direcionada.
 - Encontrar qual arquivo/linha está por trás do que aparece na tela.
 - Validar se a mudança deu certo (console, rede, visual).
-- Escolher entre dois modos conforme a situação.
+- Inspecionar web components com **Shadow DOM aberto** via helper injetável (`scripts/shadow-dom-snapshot.js`).
+- Auditar UX/UI/acessibilidade com recomendações fundamentadas (Modo C, via `end-ui-max`).
+- Escolher entre três modos conforme a situação.
 
-## Visão geral dos dois modos
+## Visão geral dos três modos
 
 | Modo | Nome | Quando usar | Você precisa fazer |
 |---|---|---|---|
 | A | Navegador automatizado | Desenvolvimento local | Rodar o app (ex.: `npm run dev`) e me passar a URL |
 | B | Print salvo em arquivo | Bug em produção/staging, ou página protegida | Tirar um print da região e salvar em `/tmp/opencode/ui-*.png` |
+| C | Auditoria UX/UI | Revisar design, acessibilidade, hierarquia, consistência | Ter evidência (Modo A/B) e `end-ui-max` disponível (empacotado nesta skill ou instalado globalmente) |
 
 ## Antes de começar (requisitos)
 
 - Modo A: precisa de dev server (ex.: `http://localhost:3000`) e o MCP `browser` instalado (já configurado: ver `~/.config/opencode/opencode.json`).
 - Modo B: só precisa salvar o print no caminho combinado.
+- Modo C: usa evidência do Modo A/B + `end-ui-max` empacotado nesta skill (ou instalado globalmente) e `python3` para auditoria UX/UI por domínio/stack.
 - Toute análise visual usa um **subagente com visão**, porque o modelo principal não "lê" imagens.
 
 ## Passo a passo — Modo A (navegador)
@@ -69,6 +73,8 @@ Essa skill ajuda o agente de IA a **"ver" sua interface** (através do navegador
 - O agente **não controla seu mouse/desktop** nem compartilha seus cookies/logins do Chrome.
 - O modelo principal **não "vê" imagens**; toda visão passa por subagente.
 - Sem dev server, o Modo A não roda (use Modo B).
+- O helper de Shadow DOM suporta apenas **open shadow root**; closed shadow root e iframe cross-origin não são acessíveis.
+- O helper de Shadow DOM suporta apenas **open shadow root**; closed shadow root e iframe cross-origin não são acessíveis.
 
 ## Segurança
 
@@ -86,6 +92,7 @@ Em uma conversa, mencione: *"Use a skill frontend-ui-inspection para editar o bo
 - [ ] `browser_take_screenshot` salva PNG (padrão em `.playwright-mcp/`).
 - [ ] Subagente de visão descreve o PNG.
 - [ ] Print em `/tmp/opencode/ui-test.png` é descrito corretamente.
+- [ ] (Modo C) `python3 end-ui-max/scripts/search.py "form validation" --domain ux` retorna resultados (empacotado nesta skill; ou caminho global equivalente).
 
 ## Status
 

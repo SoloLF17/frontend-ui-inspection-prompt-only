@@ -1,6 +1,6 @@
 ---
 name: Frontend UI Inspection
-description: Inspeciona a UI do frontend para orientar edições de código. Oferece dois modos: navegador automatizado (Playwright MCP: snapshot, screenshot, console, rede) ou print salvo em arquivo, combinados com subagente de visão para entender a tela. Use ao editar frontend, mapear elemento visual para código, reproduzir bug de layout ou validar alterações.
+description: Inspeciona a UI do frontend para orientar edições de código. Oferece três modos: navegador automatizado (Playwright MCP), print salvo em arquivo, e auditoria UX/UI com end-ui-max. Use ao editar frontend, mapear elemento visual para código, reproduzir bug de layout, revisar acessibilidade/UX/design ou validar alterações.
 ---
 
 # Frontend UI Inspection — edições assistidas por tela
@@ -26,6 +26,8 @@ description: Inspeciona a UI do frontend para orientar edições de código. Ofe
 | `tools.browser.browser_network_requests` | Falhas de API, payload |
 | `tools.browser.browser_tabs` | Várias abas/estados |
 | `tools.browser.browser_resize` | Testar responsividade |
+| `scripts/shadow-dom-snapshot.js` (via `browser_evaluate`) | Snapshot/diff em Shadow DOM aberto (web components) |
+| `end-ui-max` (`scripts/search.py`) | Auditoria UX/UI, design system, diretrizes por domínio/stack (Modo C) |
 | subagent (vision) | Descrever imagens |
 
 ## Contexto mínimo a confirmar
@@ -75,6 +77,66 @@ subagent({
 ```
 
 3. Compare a descrição com o `browser_snapshot`: ajuste classes/componentes.
+
+### Shadow DOM / Web Components (helper injetável)
+
+Use quando `browser_snapshot` não expuser elementos dentro de **Shadow DOM aberto** (web components). Este helper complementa o snapshot do Playwright; não substitui `browser_snapshot`.
+
+**Quando acionar:**
+- O elemento alvo está dentro de um custom element/web component e não aparece no snapshot.
+- Você precisa de refs estáveis próprias (`e1`, `e2`, ...) para uma sequência de `browser_evaluate`.
+- Você quer um diff estrutural após interação (`added/removed/updated`).
+
+**Instalação (uma vez por página/sessão):**
+
+1. Leia o conteúdo de `scripts/shadow-dom-snapshot.js` (desta skill).
+2. Injete na página com `browser_evaluate` (reinjete após navegação/reload).
+
+```js
+// Opção A: injete passando o código como argumento (se a ferramenta suportar `arg`/`args`).
+await tools.browser.browser_evaluate({
+  function: "(source) => { (0, eval)(source); return !!window.__agentSnapshot; }",
+  arg: scriptContent
+});
+
+// Opção B: injete como corpo da função (substitua <SCRIPT> pelo conteúdo do arquivo).
+await tools.browser.browser_evaluate({
+  function: "() => { <SCRIPT>; return !!window.__agentSnapshot; }"
+});
+```
+
+**Uso básico:**
+
+```js
+// Snapshot completo (inclui open shadow roots)
+await tools.browser.browser_evaluate({ function: "() => window.__agentSnapshot.getFull()" });
+
+// Localizar candidato por texto/role/tag
+await tools.browser.browser_evaluate({
+  function: "() => window.__agentSnapshot.query({ text: 'Entrar', role: 'button' })"
+});
+
+// Iniciar observação e coletar diffs após interação
+await tools.browser.browser_evaluate({ function: "() => window.__agentSnapshot.start()" });
+await tools.browser.browser_click({ element: "Botão Entrar", ref: "<ref-do-browser_snapshot>" });
+await tools.browser.browser_evaluate({ function: "() => window.__agentSnapshot.drainDiffs()" });
+```
+
+**API exposta (`window.__agentSnapshot`):**
+- `getFull(root?)`: snapshot completo; reseta refs (`e1...`).
+- `start(options?)` / `stop()`: observa mutações (inclui novos shadow roots abertos).
+- `drainDiffs()` / `getDiffs()`: diffs acumulados `{ added, removed, updated, timestamp }`.
+- `forceDiff()`: reavalia elementos interessantes e retorna diff.
+- `query({ text?, role?, tag?, inShadow? })`: filtra nós já capturados.
+- `getElement(ref)` / `getNode(ref)`: resolve ref para elemento/nó.
+- `summary()`: contagem total e em shadow.
+- `reset()`: limpa estado e observers.
+
+**Limites:**
+- Suporta apenas **Shadow DOM aberto** (`mode: 'open'`). Closed shadow root não é acessível por JS.
+- Não atravessa iframes cross-origin; iframes same-origin exigem avaliação no contexto correto.
+- `getFull()` pode ser custoso em DOM muito grande; prefira `query()` após snapshot inicial.
+- Refs são estáveis durante a sessão de observação; `getFull()`/`reset()` recriam refs.
 
 ### Diagnóstico de problemas
 
@@ -136,6 +198,74 @@ subagent({
 
 ---
 
+## Modo C — Inspeção + Auditoria UX/UI (companion: `end-ui-max`)
+
+Use quando o pedido for além de "onde está no código": revisar UX/UI, acessibilidade, hierarquia visual, consistência, ou sugerir melhorias de design com evidência.
+
+### Quando usar
+
+- "Revise a UX dessa tela", "melhore o design desse componente", "está acessível?".
+- Após Modo A/B, quando você já tem evidência visual/estrutural e quer recomendações fundamentadas.
+- Antes de refatorar UI: gerar direção de design (`--design-system`) ou buscar guideline específica.
+
+### Pré-requisitos
+
+- Skill `end-ui-max` disponível: empacotada em `end-ui-max/` (dentro desta skill) ou instalada globalmente em `~/.opencode/skills/end-ui-max/`.
+- Python 3 para o CLI: `python3 --version` (ou `python --version` no Windows). Se não houver Python, use as referências da skill carregada via `skill({ id: "end-ui-max" })`.
+- Evidência da UI: snapshot/screenshot/shadow helper (Modo A) ou print descrito (Modo B). **Não audite sem evidência.**
+
+### Fluxo
+
+1. **Coletar evidência** (Modo A ou B): `browser_snapshot`, screenshot descrito por visão, `browser_console_messages`, e/ou `window.__agentSnapshot.getFull()` para web components.
+2. **Definir o escopo da auditoria:** 1 intenção por busca (ex.: foco em modal, contraste, validação de formulário, hierarquia de navegação). Não misture checklist inteiro em uma query.
+3. **Consultar end-ui-max:**
+
+```bash
+# Defina o caminho do end-ui-max (empacotado nesta skill ou global)
+END_UI_MAX="end-ui-max"  # ou: ~/.opencode/skills/end-ui-max
+
+# Guideline UX específica (web)
+python3 "$END_UI_MAX/scripts/search.py" "form validation error summary" --domain ux
+
+# Stack/implementação (quando o stack for conhecido)
+python3 "$END_UI_MAX/scripts/search.py" "focus visible modal" --stack html-tailwind
+
+# Direção visual para redesign/página nova
+python3 "$END_UI_MAX/scripts/search.py" "saas dashboard analytics" --design-system -p "Meu Projeto"
+```
+
+4. **Filtrar por plataforma:** as regras/checklists do end-ui-max marcadas como "App UI (iOS/Android/RN/Flutter)" **não** se aplicam cegamente a web desktop. Para web, prefira domínios `ux`, `style`, `color`, `typography`, `landing`, `chart`, `icons` e stacks web (`html-tailwind`, `react`, `nextjs`, `vue`, `shadcn` etc.). Use regras mobile apenas quando o alvo for realmente mobile/native.
+5. **Mapear achado para código:** use o fluxo de "Mapeamento elemento → código" para apontar arquivo/linha candidato.
+6. **Reportar com evidência.** Se a busca não retornar match verificado, declare explicitamente e rotule qualquer orientação geral.
+
+### Template de relatório (Modo C)
+
+```markdown
+## Auditoria UX/UI — <página/componente>
+
+**Evidência:** <snapshot/screenshot/shadow summary/console>
+**Stack/plataforma:** <ex.: Next.js web desktop/mobile>
+
+### Achados
+1. **Achado:** <problema observado>
+   - **Evidência:** <o que foi visto no snapshot/print/DOM>
+   - **Regra/Guideline:** <resultado end-ui-max: domínio, query, recomendação; ou "sem match verificado">
+   - **Arquivo/linha candidato:** `path:line` — <trecho>
+   - **Correção sugerida:** <mudança concreta>
+   - **Risco:** baixo/médio/alto — <motivo>
+```
+
+### Guardrails
+
+- **Evidência primeiro:** não faça auditoria "de cabeça".
+- **1 intenção por query:** busque um problema observável por vez.
+- **Verificar antes de usar:** confirme que o resultado do end-ui-max se aplica ao produto/plataforma.
+- **Sem match verificado:** diga claramente; não apresente palpite como resultado da base.
+- **Não extrapolar mobile para web:** safe areas, 44pt/48dp, Dynamic Type etc. só quando o alvo for mobile/native.
+- **Sem mudanças destrutivas sem confirmação.**
+
+---
+
 ## Mapeamento elemento → código
 
 Quando houver descrição ou texto, siga esta ordem:
@@ -164,6 +294,7 @@ Quando houver descrição ou texto, siga esta ordem:
 - DevTools do browser no Playwright MCP não existem; use `browser_evaluate` para `outerHTML`/estilos.
 - Se a app exigir autenticação, forneça URL já autenticada, credenciais de teste (nunca produção) ou cookie manual via `browser_evaluate`/headers.
 - Screenshots grandes podem falhar; use região/viewport.
+- Web components/Shadow DOM: `browser_snapshot` pode não expor o conteúdo esperado. Para **Shadow DOM aberto**, injete `scripts/shadow-dom-snapshot.js`; **closed shadow root** não é acessível via JS. Iframes cross-origin também não são atravessáveis.
 
 ## Permissões / configuração
 
@@ -181,15 +312,17 @@ Em `~/.config/opencode/opencode.json`:
 - [ ] Subagente `opencode/nemotron-3.5-super-vl-free` descreve o PNG corretamente.
 - [ ] Para print manual: salvar em `/tmp/opencode/ui-test.png` e o subagente descreve.
 - [ ] `browser_console_messages({ level: "error" })` retorna sem crash.
+- [ ] `scripts/shadow-dom-snapshot.js` injeta via `browser_evaluate` e `window.__agentSnapshot.getFull()` retorna nós (em página com Shadow DOM aberto).
+- [ ] (Modo C) `python3 end-ui-max/scripts/search.py "form validation" --domain ux` retorna resultados (empacotado nesta skill; ou caminho global equivalente).
 
 ## Comparação rápida dos modos
 
-| Critério | Modo A (browser) | Modo B (print) |
-|---|---|---|
-| Velocidade | Média (navegação + snapshot) | Rápida (você captura) |
-| Precisão técnica | Alta (DOM, estilos, console, rede) | Média (depende do recorte) |
-| Estados/interações | Sim (click/hover/form) | Não |
-| Dependência de dev server | Sim | Não |
-| Privacidade/produção | Use staging | Pode usar produção (sem dados sensíveis) |
+| Critério | Modo A (browser) | Modo B (print) | Modo C (auditoria UX/UI) |
+|---|---|---|---|
+| Velocidade | Média (navegação + snapshot) | Rápida (você captura) | Média/Alta (inspeção + buscas) |
+| Precisão técnica | Alta (DOM, estilos, console, rede) | Média (depende do recorte) | Alta quando baseada em evidência |
+| Estados/interações | Sim (click/hover/form) | Não | Depende do Modo A/B usado como base |
+| Dependência de dev server | Sim | Não | Não (mas Modo A ajuda) |
+| Privacidade/produção | Use staging | Pode usar produção (sem dados sensíveis) | Mesmas regras da evidência usada |
 
-Recomendação: **Modo A** para desenvolvimento local iterativo; **Modo B** para reportar bug em produção/staging sem automação.
+Recomendação: **Modo A** para desenvolvimento local iterativo; **Modo B** para reportar bug em produção/staging sem automação; **Modo C** quando precisar avaliar/melhorar UX, acessibilidade ou design com recomendações fundamentadas.

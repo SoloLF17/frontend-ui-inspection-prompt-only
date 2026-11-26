@@ -13,13 +13,25 @@ Esta versão não depende de Playwright MCP. Funciona em qualquer agente de IA q
 - O agente descreve o print e localiza o código por texto/classes.
 
 ## Limitações
-- Sem navegador automatizado (sem DOM/estilos/console/rede).
+- Sem navegador automatizado (sem DOM/estilos/console/rede) por padrão.
 - Depende da qualidade do recorte/marcação.
+- O helper `scripts/shadow-dom-snapshot.js` é útil quando houver `browser_evaluate` disponível; em modo apenas prompt/print, ele não se aplica.
 
 ## Conteudo
 - `SYSTEM_PROMPT.txt` — prompt curto
 - `SKILL.md` — instrução completa (referência)
 - `README.skill.md` — explicação simples da skill
+- `scripts/shadow-dom-snapshot.js` — helper injetável para Shadow DOM aberto (quando houver browser tools)
+
+## Modo C — Auditoria UX/UI (opcional)
+
+Com `end-ui-max` empacotado nesta skill (ou instalado globalmente) e Python 3, use o Modo C para auditar UX/UI com evidência (snapshot/print) e buscas por domínio/stack:
+
+```bash
+python3 end-ui-max/scripts/search.py "form validation error summary" --domain ux
+```
+
+Filtre regras mobile-only em projetos web e declare quando não houver match verificado.
 
 ## Integração por agente
 Veja `agents/agent-integration.md` (Claude Code, Cursor, Codex, chat generico).
